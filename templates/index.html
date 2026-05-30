@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aether Vision - YOLOv11 Object Detection Dashboard</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Custom Style -->
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Settings -->
+        <aside class="sidebar">
+            <div class="brand">
+                <i class="fa-solid fa-wand-magic-sparkles brand-icon"></i>
+                <div class="brand-text">
+                    <h1>Aether Vision</h1>
+                    <span>YOLOv11 Analytics</span>
+                </div>
+            </div>
+            
+            <div class="status-panel">
+                <div class="status-indicator">
+                    <span class="status-dot pulsing"></span>
+                    <span id="system-status-text">Connecting...</span>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item active" data-tab="dashboard">
+                    <i class="fa-solid fa-chart-line"></i> Dashboard
+                </a>
+                <a href="#" class="nav-item" data-tab="image-studio">
+                    <i class="fa-solid fa-image"></i> Image Studio
+                </a>
+                <a href="#" class="nav-item" data-tab="webcam-live">
+                    <i class="fa-solid fa-video"></i> Webcam Live
+                </a>
+                <a href="#" class="nav-item" data-tab="video-lab">
+                    <i class="fa-solid fa-film"></i> Video Lab
+                </a>
+            </nav>
+
+            <div class="settings-panel">
+                <h2><i class="fa-solid fa-sliders"></i> Parameters</h2>
+                
+                <div class="setting-item">
+                    <div class="setting-header">
+                        <label for="conf-range">Confidence Threshold</label>
+                        <span id="conf-val">0.25</span>
+                    </div>
+                    <input type="range" id="conf-range" min="0.05" max="1.00" step="0.05" value="0.25">
+                </div>
+
+                <div class="setting-item">
+                    <div class="setting-header">
+                        <label for="iou-range">IoU Threshold</label>
+                        <span id="iou-val">0.45</span>
+                    </div>
+                    <input type="range" id="iou-range" min="0.05" max="1.00" step="0.05" value="0.45">
+                </div>
+
+                <div class="setting-item class-filter-container">
+                    <label>Active Class Filters</label>
+                    <div class="class-search-box">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <input type="text" id="class-search" placeholder="Search classes...">
+                    </div>
+                    <div class="class-actions">
+                        <button type="button" id="btn-select-all" class="btn-text">Select All</button>
+                        <button type="button" id="btn-clear-all" class="btn-text">Clear All</button>
+                    </div>
+                    <div class="class-checkbox-list" id="class-list">
+                        <!-- Classes will be loaded dynamically -->
+                        <div class="loading-classes">
+                            <i class="fa-solid fa-circle-notch fa-spin"></i> Loading classes...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Workspace -->
+        <main class="main-content">
+            <!-- Header bar -->
+            <header class="top-bar">
+                <div class="page-title">
+                    <h2 id="current-tab-title">Analytics Dashboard</h2>
+                    <p id="current-tab-subtitle">Real-time object detection telemetry & metrics</p>
+                </div>
+                <div class="model-badge">
+                    <i class="fa-solid fa-cube"></i>
+                    <span>YOLO11n Active (yolo11n.pt)</span>
+                </div>
+            </header>
+
+            <!-- Dashboard Panel -->
+            <section id="dashboard-tab" class="tab-panel active">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon purple"><i class="fa-solid fa-eye"></i></div>
+                        <div class="stat-info">
+                            <h3>Total Detections</h3>
+                            <p id="stat-total-detections">0</p>
+                            <span class="stat-trend"><i class="fa-solid fa-arrow-up"></i> Session Accumulation</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon blue"><i class="fa-solid fa-bolt"></i></div>
+                        <div class="stat-info">
+                            <h3>Avg Inference</h3>
+                            <p id="stat-latency">-- ms</p>
+                            <span class="stat-trend"><i class="fa-solid fa-clock"></i> YOLOv11n speed</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon emerald"><i class="fa-solid fa-gauge-high"></i></div>
+                        <div class="stat-info">
+                            <h3>Webcam FPS</h3>
+                            <p id="stat-fps">--</p>
+                            <span class="stat-trend"><i class="fa-solid fa-microchip"></i> Client Render</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon orange"><i class="fa-solid fa-circle-info"></i></div>
+                        <div class="stat-info">
+                            <h3>Top Class</h3>
+                            <p id="stat-top-class">None</p>
+                            <span class="stat-trend"><i class="fa-solid fa-chart-pie"></i> Most detected item</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h3>Detection Distribution</h3>
+                            <span>Class frequencies detected in this session</span>
+                        </div>
+                        <div class="chart-body">
+                            <canvas id="chart-distribution"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card log-card">
+                        <div class="chart-header">
+                            <h3>Live Detection Log</h3>
+                            <button id="btn-clear-logs" class="btn-icon" title="Clear logs"><i class="fa-solid fa-trash-can"></i></button>
+                        </div>
+                        <div class="chart-body">
+                            <div class="log-stream" id="log-stream-container">
+                                <div class="log-empty-state">
+                                    <i class="fa-solid fa-terminal"></i>
+                                    <p>Activity log is empty. Upload images or run webcam to trigger telemetry stream.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Image Studio Panel -->
+            <section id="image-studio-tab" class="tab-panel">
+                <div class="studio-layout">
+                    <div class="studio-main-card">
+                        <div class="image-workspace" id="image-workspace-view">
+                            <!-- Drag & drop zone -->
+                            <div class="upload-dropzone" id="image-dropzone">
+                                <i class="fa-solid fa-cloud-arrow-up upload-icon"></i>
+                                <h3>Drag & Drop Image Here</h3>
+                                <p>Supports JPG, PNG, WEBP files up to 10MB</p>
+                                <button type="button" class="btn-primary" onclick="document.getElementById('image-file-input').click()">Browse Files</button>
+                                <input type="file" id="image-file-input" accept="image/*" style="display: none;">
+                            </div>
+                            
+                            <!-- Split Screen Comparison Slider -->
+                            <div class="comparison-container hidden" id="comparison-slider">
+                                <div class="image-wrapper before-wrapper">
+                                    <img id="img-original" src="" alt="Original Image">
+                                    <span class="image-label">Original</span>
+                                </div>
+                                <div class="image-wrapper after-wrapper">
+                                    <img id="img-processed" src="" alt="Processed Detections">
+                                    <span class="image-label">Detected</span>
+                                </div>
+                                <input type="range" min="0" max="100" value="50" class="slider-handle" id="slider-handle-ctrl">
+                                <div class="slider-bar"></div>
+                                <div class="slider-button"><i class="fa-solid fa-left-right"></i></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="studio-sidebar-card">
+                        <div class="card-header">
+                            <h3>Detections Table</h3>
+                            <span id="img-detection-count" class="badge">0 objects</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="detection-list-wrapper">
+                                <table class="detection-table" id="img-detection-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Class</th>
+                                            <th>Confidence</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="img-detection-tbody">
+                                        <tr class="table-empty">
+                                            <td colspan="3">
+                                                <div class="table-empty-state">
+                                                    <i class="fa-solid fa-image"></i>
+                                                    <p>Upload an image to see detection breakdown.</p>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Webcam Live Panel -->
+            <section id="webcam-live-tab" class="tab-panel">
+                <div class="webcam-layout">
+                    <div class="webcam-view-card">
+                        <div class="webcam-container">
+                            <video id="webcam-video" autoplay playsinline muted class="hidden"></video>
+                            <canvas id="webcam-canvas"></canvas>
+                            <div class="webcam-overlay-state" id="webcam-overlay-msg">
+                                <i class="fa-solid fa-camera-retro"></i>
+                                <p>Webcam is currently inactive</p>
+                                <div class="webcam-init-buttons" style="display: flex; gap: 12px; margin-top: 10px;">
+                                    <button type="button" class="btn-primary" id="btn-start-webcam">
+                                        <i class="fa-solid fa-play"></i> Start Webcam
+                                    </button>
+                                    <button type="button" class="btn-secondary" id="btn-fallback-upload">
+                                        <i class="fa-solid fa-cloud-arrow-up"></i> Upload Image
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="webcam-controls">
+                            <div class="controls-left">
+                                <button type="button" class="btn-danger hidden" id="btn-stop-webcam">
+                                    <i class="fa-solid fa-stop"></i> Stop Stream
+                                </button>
+                                <div class="device-select-container select-styled hidden" id="webcam-source-wrapper">
+                                    <i class="fa-solid fa-video"></i>
+                                    <select id="webcam-source"></select>
+                                </div>
+                            </div>
+                            <div class="controls-right">
+                                <div class="webcam-stat-indicator">
+                                    <span>Stream Latency: </span>
+                                    <strong id="webcam-latency-txt">-- ms</strong>
+                                </div>
+                                <div class="webcam-stat-indicator">
+                                    <span>FPS: </span>
+                                    <strong id="webcam-fps-txt">--</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="webcam-results-card">
+                        <div class="card-header">
+                            <h3>Real-time Summary</h3>
+                            <span id="webcam-status-badge" class="badge bg-red">Offline</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="webcam-summary-list" id="webcam-summary-items">
+                                <div class="summary-empty-state">
+                                    <i class="fa-solid fa-satellite-dish"></i>
+                                    <p>Start webcam feed to begin processing streams.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Video Lab Panel -->
+            <section id="video-lab-tab" class="tab-panel">
+                <div class="video-layout">
+                    <div class="video-card">
+                        <div class="video-workspace" id="video-workspace-view">
+                            <!-- Dropzone -->
+                            <div class="upload-dropzone" id="video-dropzone">
+                                <i class="fa-solid fa-file-video upload-icon"></i>
+                                <h3>Drag & Drop Video Here</h3>
+                                <p>Supports MP4, AVI, MOV up to 50MB</p>
+                                <button type="button" class="btn-primary" onclick="document.getElementById('video-file-input').click()">Browse Files</button>
+                                <input type="file" id="video-file-input" accept="video/*" style="display: none;">
+                            </div>
+
+                            <!-- Processing State -->
+                            <div class="video-processing-state hidden" id="video-processing-view">
+                                <div class="loader-spinner">
+                                    <i class="fa-solid fa-cog fa-spin spinner-large"></i>
+                                    <i class="fa-solid fa-cube pulsing-model"></i>
+                                </div>
+                                <h3 id="video-progress-title">Uploading Video...</h3>
+                                <div class="progress-bar-container">
+                                    <div class="progress-bar-fill" id="video-progress-fill" style="width: 0%;"></div>
+                                </div>
+                                <p id="video-progress-detail">Starting frame detection on YOLO11...</p>
+                            </div>
+
+                            <!-- Playback Area -->
+                            <div class="video-playback-container hidden" id="video-playback-view">
+                                <div class="video-player-wrapper">
+                                    <video id="video-player-output" controls></video>
+                                    <span class="video-badge-overlay">Processed Output</span>
+                                </div>
+                                <div class="video-playback-controls">
+                                    <button type="button" class="btn-primary" id="btn-download-video">
+                                        <i class="fa-solid fa-download"></i> Download Video
+                                    </button>
+                                    <button type="button" class="btn-secondary" id="btn-reset-video">
+                                        <i class="fa-solid fa-rotate-left"></i> Analyze Another Video
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Crop Image Modal -->
+    <div class="modal hidden" id="crop-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="crop-modal-title">Cropped Detections</h3>
+                <button type="button" class="btn-icon" id="btn-close-modal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="crop-image-wrapper">
+                    <img id="modal-crop-img" src="" alt="Cropped Detection">
+                </div>
+                <div class="crop-details">
+                    <p><strong>Class:</strong> <span id="modal-crop-class">Person</span></p>
+                    <p><strong>Confidence:</strong> <span id="modal-crop-conf">98.4%</span></p>
+                    <p><strong>Coordinates [X1, Y1, X2, Y2]:</strong> <span id="modal-crop-coords">[241, 110, 480, 600]</span></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Core App Logic -->
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

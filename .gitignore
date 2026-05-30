@@ -1,0 +1,8 @@
+venv/
+*.pyc
+__pycache__/
+static/uploads/source_*
+static/uploads/processed_*
+.DS_Store
+.idea/
+.vscode/
