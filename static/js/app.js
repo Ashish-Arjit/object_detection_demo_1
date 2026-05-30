@@ -18,6 +18,25 @@ let lastWebcamFrameTime = 0;
 // Loaded original image element for crop feature
 let loadedOriginalImage = null;
 
+// Serverless fallback parameters
+let useClientInference = false;
+let ortSession = null;
+
+const cocoClasses = {
+    0: "person", 1: "bicycle", 2: "car", 3: "motorcycle", 4: "airplane", 5: "bus", 6: "train", 7: "truck", 8: "boat",
+    9: "traffic light", 10: "fire hydrant", 11: "stop sign", 12: "parking meter", 13: "bench", 14: "bird", 15: "cat",
+    16: "dog", 17: "horse", 18: "sheep", 19: "cow", 20: "elephant", 21: "bear", 22: "zebra", 23: "giraffe",
+    24: "backpack", 25: "umbrella", 26: "handbag", 27: "tie", 28: "suitcase", 29: "frisbee", 30: "skis",
+    31: "snowboard", 32: "sports ball", 33: "kite", 34: "baseball bat", 35: "baseball glove", 36: "skateboard",
+    37: "surfboard", 38: "tennis racket", 39: "bottle", 40: "wine glass", 41: "cup", 42: "fork", 43: "knife",
+    44: "spoon", 45: "bowl", 46: "banana", 47: "apple", 48: "sandwich", 49: "orange", 50: "broccoli",
+    51: "carrot", 52: "hot dog", 53: "pizza", 54: "donut", 55: "cake", 56: "chair", 57: "couch",
+    58: "potted plant", 59: "bed", 60: "dining table", 61: "toilet", 62: "tv", 63: "laptop", 64: "mouse",
+    65: "remote", 66: "keyboard", 67: "cell phone", 68: "microwave", 69: "oven", 70: "toaster", 71: "sink",
+    72: "refrigerator", 73: "book", 74: "clock", 75: "vase", 76: "scissors", 77: "teddy bear",
+    78: "hair drier", 79: "toothbrush"
+};
+
 // Initializer
 document.addEventListener('DOMContentLoaded', () => {
     initTabs();
@@ -107,58 +126,50 @@ function initSliders() {
 // 3. Load YOLO Class Names
 async function loadClasses() {
     const classListContainer = document.getElementById('class-list');
+    
+    // Bind Class search and actions once, outside the fetch
+    const searchInput = document.getElementById('class-search');
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase();
+            const checkboxItems = classListContainer.querySelectorAll('.class-checkbox-item');
+            checkboxItems.forEach(item => {
+                const name = item.querySelector('span').textContent.toLowerCase();
+                item.style.display = name.includes(query) ? 'flex' : 'none';
+            });
+        });
+    }
+    
+    const btnSelectAll = document.getElementById('btn-select-all');
+    if (btnSelectAll) {
+        btnSelectAll.addEventListener('click', () => {
+            classListContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
+        });
+    }
+    
+    const btnClearAll = document.getElementById('btn-clear-all');
+    if (btnClearAll) {
+        btnClearAll.addEventListener('click', () => {
+            classListContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+        });
+    }
+
     try {
         const response = await fetch('/api/classes');
+        if (!response.ok) throw new Error("HTTP error " + response.status);
         const data = await response.json();
         
         if (data.success) {
             classesMap = data.classes;
-            classListContainer.innerHTML = '';
-            
-            // Dynamically construct search list
-            Object.entries(classesMap).forEach(([id, name]) => {
-                const item = document.createElement('label');
-                item.className = 'class-checkbox-item';
-                item.innerHTML = `
-                    <input type="checkbox" value="${id}" checked data-class-name="${name}">
-                    <span>${name}</span>
-                `;
-                classListContainer.appendChild(item);
-            });
-            
-            // Set up Class search filtering
-            const searchInput = document.getElementById('class-search');
-            searchInput.addEventListener('input', (e) => {
-                const query = e.target.value.toLowerCase();
-                const checkboxItems = classListContainer.querySelectorAll('.class-checkbox-item');
-                
-                checkboxItems.forEach(item => {
-                    const name = item.querySelector('span').textContent.toLowerCase();
-                    if (name.includes(query)) {
-                        item.style.display = 'flex';
-                    } else {
-                        item.style.display = 'none';
-                    }
-                });
-            });
-            
-            // Select & Clear Action Buttons
-            document.getElementById('btn-select-all').addEventListener('click', () => {
-                classListContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
-            });
-            
-            document.getElementById('btn-clear-all').addEventListener('click', () => {
-                classListContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
-            });
-            
+            populateClassCheckboxes();
             setSystemStatus("System Ready - YOLOv11 Active", "pulsing");
         } else {
             throw new Error(data.error);
         }
     } catch (error) {
-        console.error("Error loading classes:", error);
-        classListContainer.innerHTML = `<div class="loading-classes" style="color: var(--danger)"><i class="fa-solid fa-circle-exclamation"></i> Error loading classes</div>`;
-        setSystemStatus("Model Loading Error", "bg-red");
+        console.warn("Backend API offline. Activating client-side Web-ONNX engine...", error);
+        useClientInference = true;
+        initClientInference();
     }
 }
 
@@ -375,6 +386,12 @@ function processImageFile(file) {
         
         // Show original immediately on DOM comparison uploader
         document.getElementById('img-original').src = base64Img;
+        
+        // Divert to client-side ONNX Runtime Web if backend is offline
+        if (useClientInference) {
+            runClientInference(base64Img);
+            return;
+        }
         
         // Update uploader state view to show processing loading spinner
         const dropzone = document.getElementById('image-dropzone');
@@ -767,6 +784,11 @@ function updateWebcamFps() {
 async function captureWebcamFrame() {
     if (!webcamActive || webcamProcessing) return;
     
+    if (useClientInference) {
+        runClientWebcamInference();
+        return;
+    }
+    
     const video = document.getElementById('webcam-video');
     const canvas = document.getElementById('webcam-canvas');
     
@@ -940,6 +962,11 @@ function initVideoLab() {
             return;
         }
         
+        if (useClientInference) {
+            alert("Video Lab requires a running Python Flask server to process and write video frames.");
+            return;
+        }
+        
         // Show loading screen state
         dropzone.classList.add('hidden');
         document.getElementById('video-processing-view').classList.remove('hidden');
@@ -1041,4 +1068,325 @@ function initVideoLab() {
         fileInput.value = '';
         dropzone.classList.remove('hidden');
     }
+}
+
+// ==========================================
+// 8. Client-Side Web-ONNX Engine Core
+// ==========================================
+
+function populateClassCheckboxes() {
+    const classListContainer = document.getElementById('class-list');
+    classListContainer.innerHTML = '';
+    
+    Object.entries(classesMap).forEach(([id, name]) => {
+        const item = document.createElement('label');
+        item.className = 'class-checkbox-item';
+        item.innerHTML = `
+            <input type="checkbox" value="${id}" checked data-class-name="${name}">
+            <span>${name}</span>
+        `;
+        classListContainer.appendChild(item);
+    });
+}
+
+async function initClientInference() {
+    setSystemStatus("Loading Web-ONNX...", "pulsing");
+    logTelemetry('info', "Local server offline. Booting client-side ONNX Runtime Web...");
+    
+    // Disable Video Lab Dropzone
+    const videoDropzone = document.getElementById('video-dropzone');
+    if (videoDropzone) {
+        videoDropzone.innerHTML = `
+            <i class="fa-solid fa-server-slash upload-icon" style="color: var(--orange)"></i>
+            <h3>Video Lab Offline</h3>
+            <p>Video processing requires a running Python Flask server to encode video frames.</p>
+            <span style="font-size: 11px; color: var(--text-muted)">Please run the app locally to enable Video Lab.</span>
+        `;
+    }
+    
+    try {
+        // Load the ONNX model from repository root
+        ortSession = await ort.InferenceSession.create('yolo11n.onnx');
+        classesMap = cocoClasses;
+        populateClassCheckboxes();
+        setSystemStatus("Web-ONNX Active", "pulsing");
+        logTelemetry('success', "Web-ONNX engine active (serverless, 10.2MB weights loaded)");
+    } catch (err) {
+        console.error("ONNX model load failed:", err);
+        setSystemStatus("ONNX Loader Error", "bg-red");
+        logTelemetry('danger', `Failed to load client-side ONNX model: ${err.message}. Make sure yolo11n.onnx is fully pushed to GitHub.`);
+    }
+}
+
+async function runClientInference(base64Img) {
+    const dropzone = document.getElementById('image-dropzone');
+    dropzone.innerHTML = `
+        <i class="fa-solid fa-spinner fa-spin upload-icon"></i>
+        <h3>Running Client-Side ONNX Engine...</h3>
+        <p>Analyzing image objects in-browser</p>
+    `;
+    
+    try {
+        const startTime = performance.now();
+        
+        // Load image in HTML Image element
+        const img = new Image();
+        img.src = base64Img;
+        await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+        });
+        
+        // 1. Preprocess: Resize to 640x640 and construct float32 tensor
+        const inputWidth = 640;
+        const inputHeight = 640;
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = inputWidth;
+        tempCanvas.height = inputHeight;
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.drawImage(img, 0, 0, inputWidth, inputHeight);
+        
+        const imgData = tempCtx.getImageData(0, 0, inputWidth, inputHeight);
+        const data = imgData.data;
+        
+        const float32Data = new Float32Array(3 * inputWidth * inputHeight);
+        for (let i = 0; i < inputWidth * inputHeight; i++) {
+            float32Data[i] = data[i * 4] / 255.0;
+            float32Data[inputWidth * inputHeight + i] = data[i * 4 + 1] / 255.0;
+            float32Data[2 * inputWidth * inputHeight + i] = data[i * 4 + 2] / 255.0;
+        }
+        
+        const tensor = new ort.Tensor('float32', float32Data, [1, 3, inputWidth, inputHeight]);
+        
+        // 2. Inference
+        const outputs = await ortSession.run({ images: tensor });
+        const outputKey = Object.keys(outputs)[0];
+        const outputTensor = outputs[outputKey]; // shape [1, 84, 8400]
+        
+        const inferenceTime = Math.round(performance.now() - startTime);
+        
+        // 3. Postprocess
+        const detections = postprocessONNX(outputTensor.data, img.width, img.height);
+        
+        // 4. Draw boxes on original-sized canvas
+        const drawCanvas = document.createElement('canvas');
+        drawCanvas.width = img.width;
+        drawCanvas.height = img.height;
+        const drawCtx = drawCanvas.getContext('2d');
+        drawCtx.drawImage(img, 0, 0);
+        
+        detections.forEach(d => {
+            const [x1, y1, x2, y2] = d.box;
+            const color = getClassColor(d.class_id);
+            
+            // Draw box
+            drawCtx.strokeStyle = color;
+            drawCtx.lineWidth = Math.max(2, Math.round(img.width / 300));
+            drawCtx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+            
+            // Draw label background
+            const label = `${d.class_name} ${(d.confidence * 100).toFixed(0)}%`;
+            const fontSize = Math.max(10, Math.round(img.width / 50));
+            drawCtx.font = `bold ${fontSize}px "Inter", sans-serif`;
+            const labelWidth = drawCtx.measureText(label).width;
+            const labelHeight = fontSize + 6;
+            
+            drawCtx.fillStyle = color;
+            drawCtx.fillRect(x1 - 1, y1 - labelHeight, labelWidth + 10, labelHeight);
+            
+            drawCtx.fillStyle = '#ffffff';
+            drawCtx.fillText(label, x1 + 4, y1 - 4);
+        });
+        
+        // 5. Update UI comparative view
+        const processedBase64 = drawCanvas.toDataURL('image/jpeg');
+        document.getElementById('img-processed').src = processedBase64;
+        
+        // Toggle uploader workspace
+        dropzone.classList.add('hidden');
+        document.getElementById('comparison-slider').classList.remove('hidden');
+        
+        // Update detections breakdown table
+        updateDetectionTable(detections);
+        
+        // Update session stats & logs
+        const summary = {};
+        detections.forEach(d => {
+            summary[d.class_name] = (summary[d.class_name] || 0) + 1;
+        });
+        
+        const detectionsText = Object.entries(summary).map(([name, num]) => `${num} ${name}(s)`).join(', ') || 'No objects';
+        
+        sessionStats.totalDetections += detections.length;
+        sessionStats.inferenceTimes.push(inferenceTime);
+        
+        Object.entries(summary).forEach(([name, num]) => {
+            sessionStats.classCounts[name] = (sessionStats.classCounts[name] || 0) + num;
+        });
+        
+        logTelemetry('success', `[Web-ONNX] Detected: ${detectionsText}`, inferenceTime);
+        updateDashboardCharts();
+        
+    } catch (error) {
+        console.error("Web-ONNX inference error:", error);
+        alert("Client-side ONNX inference failed: " + error.message);
+        resetImageStudio();
+    }
+}
+
+async function runClientWebcamInference() {
+    const video = document.getElementById('webcam-video');
+    const canvas = document.getElementById('webcam-canvas');
+    
+    // Create temporary 640x640 canvas to extract tensor
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = 640;
+    tempCanvas.height = 640;
+    const tempCtx = tempCanvas.getContext('2d');
+    tempCtx.drawImage(video, 0, 0, 640, 640);
+    
+    const imgData = tempCtx.getImageData(0, 0, 640, 640);
+    const data = imgData.data;
+    
+    const float32Data = new Float32Array(3 * 640 * 640);
+    for (let i = 0; i < 640 * 640; i++) {
+        float32Data[i] = data[i * 4] / 255.0;
+        float32Data[640 * 640 + i] = data[i * 4 + 1] / 255.0;
+        float32Data[2 * 640 * 640 + i] = data[i * 4 + 2] / 255.0;
+    }
+    
+    webcamProcessing = true;
+    const startTime = performance.now();
+    
+    try {
+        const tensor = new ort.Tensor('float32', float32Data, [1, 3, 640, 640]);
+        const outputs = await ortSession.run({ images: tensor });
+        const outputKey = Object.keys(outputs)[0];
+        const outputTensor = outputs[outputKey];
+        
+        const latency = Math.round(performance.now() - startTime);
+        
+        // Postprocess (canvas size is currently video.videoWidth x video.videoHeight)
+        const detections = postprocessONNX(outputTensor.data, canvas.width, canvas.height);
+        
+        if (webcamActive) {
+            // Draw boxes
+            drawWebcamBoxes(detections);
+            
+            // Update latency
+            document.getElementById('webcam-latency-txt').textContent = `${latency} ms`;
+            
+            // Update webcam class summaries panel
+            updateWebcamSummary(summary);
+            
+            // Stats Accumulation
+            sessionStats.totalDetections += detections.length;
+            sessionStats.inferenceTimes.push(latency);
+            if (sessionStats.inferenceTimes.length > 100) {
+                sessionStats.inferenceTimes.shift();
+            }
+            Object.entries(summary).forEach(([name, num]) => {
+                sessionStats.classCounts[name] = (sessionStats.classCounts[name] || 0) + num;
+            });
+            webcamFramesCount++;
+        }
+    } catch (err) {
+        console.error("ONNX frame analysis error:", err);
+    } finally {
+        webcamProcessing = false;
+    }
+}
+
+function postprocessONNX(data, originalWidth, originalHeight) {
+    const numAnchors = 8400;
+    const numClasses = 80;
+    const rowSize = numAnchors; // 8400
+    const confThreshold = parseFloat(document.getElementById('conf-range').value);
+    const iouThreshold = parseFloat(document.getElementById('iou-range').value);
+    const filterClasses = getFilterClasses();
+    
+    const candidateBoxes = [];
+    
+    for (let i = 0; i < numAnchors; i++) {
+        // Find best class score
+        let maxScore = -1;
+        let classId = -1;
+        
+        for (let c = 0; c < numClasses; c++) {
+            const score = data[(4 + c) * rowSize + i];
+            if (score > maxScore) {
+                maxScore = score;
+                classId = c;
+            }
+        }
+        
+        if (maxScore > confThreshold) {
+            // Check if class is filtered out
+            if (filterClasses.length > 0 && !filterClasses.includes(classId.toString())) {
+                continue;
+            }
+            
+            // Bounding box dimensions relative to 640x640 input
+            const cx = data[0 * rowSize + i];
+            const cy = data[1 * rowSize + i];
+            const w = data[2 * rowSize + i];
+            const h = data[3 * rowSize + i];
+            
+            // Map box back to original image coordinates
+            const x1 = Math.max(0, ((cx - w / 2) / 640) * originalWidth);
+            const y1 = Math.max(0, ((cy - h / 2) / 640) * originalHeight);
+            const x2 = Math.min(originalWidth, ((cx + w / 2) / 640) * originalWidth);
+            const y2 = Math.min(originalHeight, ((cy + h / 2) / 640) * originalHeight);
+            
+            candidateBoxes.push({
+                class_id: classId,
+                class_name: classesMap[classId],
+                confidence: maxScore,
+                box: [x1, y1, x2, y2]
+            });
+        }
+    }
+    
+    // Apply Non-Maximum Suppression (NMS)
+    return nms(candidateBoxes, iouThreshold);
+}
+
+function nms(boxes, iouThreshold) {
+    // Sort boxes by confidence score descending
+    boxes.sort((a, b) => b.confidence - a.confidence);
+    
+    const keep = [];
+    const active = new Array(boxes.length).fill(true);
+    
+    for (let i = 0; i < boxes.length; i++) {
+        if (!active[i]) continue;
+        keep.push(boxes[i]);
+        
+        for (let j = i + 1; j < boxes.length; j++) {
+            if (!active[j]) continue;
+            
+            // Check IoU
+            const iou = calculateIoU(boxes[i].box, boxes[j].box);
+            if (iou > iouThreshold) {
+                active[j] = false;
+            }
+        }
+    }
+    return keep;
+}
+
+function calculateIoU(box1, box2) {
+    const xA = Math.max(box1[0], box2[0]);
+    const yA = Math.max(box1[1], box2[1]);
+    const xB = Math.min(box1[2], box2[2]);
+    const yB = Math.min(box1[3], box2[3]);
+    
+    const interArea = Math.max(0, xB - xA) * Math.max(0, yB - yA);
+    if (interArea === 0) return 0;
+    
+    const box1Area = (box1[2] - box1[0]) * (box1[3] - box1[1]);
+    const box2Area = (box2[2] - box2[0]) * (box2[3] - box2[1]);
+    
+    const iou = interArea / (box1Area + box2Area - interArea);
+    return iou;
 }
