@@ -351,6 +351,12 @@ function initImageStudio() {
     document.getElementById('crop-modal').addEventListener('click', (e) => {
         if (e.target.id === 'crop-modal') hideModal();
     });
+    
+    // Delete image event listener
+    const btnDelete = document.getElementById('btn-delete-image');
+    if (btnDelete) {
+        btnDelete.addEventListener('click', resetImageStudio);
+    }
 }
 
 function processImageFile(file) {

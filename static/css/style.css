@@ -1436,3 +1436,33 @@ input[type="range"]::-webkit-slider-thumb:hover {
     font-family: monospace;
     font-weight: 600;
 }
+
+/* Floating Delete Button for Image Studio */
+.btn-delete-img {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background-color: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: #f87171;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 10;
+    transition: all 0.2s ease-in-out;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.15);
+}
+
+.btn-delete-img:hover {
+    background-color: var(--danger);
+    border-color: var(--danger);
+    color: white;
+    box-shadow: 0 4px 16px rgba(239, 68, 68, 0.5);
+    transform: scale(1.05);
+}
